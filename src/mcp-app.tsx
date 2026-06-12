@@ -403,20 +403,13 @@ function DiagramView({ toolInput, isFinal, displayMode, onElements, editedElemen
         if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
         animFrameRef.current = requestAnimationFrame(animateViewBox);
       } else {
-        // No explicit viewport — use default
-        const defaultVP: ViewportRect = { x: 0, y: 0, width: 1024, height: 768 };
-        onViewport?.(defaultVP);
-        targetVP.current = defaultVP;
-        if (!animatedVP.current) {
-          animatedVP.current = { ...defaultVP };
-        }
-        applyViewBox();
+        // No explicit camera — keep the auto-fitted 4:3 viewBox computed by
+        // fixViewBox4x3 above (encloses all elements). Don't impose a fixed
+        // 1024x768 default, which would crop elements outside that box.
         if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-        animFrameRef.current = requestAnimationFrame(animateViewBox);
+        animatedVP.current = null;   // no scene-space camera animation in this mode
         targetVP.current = null;
-        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-        // Apply user zoom on top of the fixed viewBox
-        applyZoom();
+        applyZoom();                 // re-apply user zoom on top of the fitted box
       }
     } catch {
       // export can fail on partial/malformed elements
