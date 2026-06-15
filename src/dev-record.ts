@@ -18,6 +18,7 @@
  * IMPORTANT: the durations/easing below mirror src/global.css. If those
  * @keyframes change, update FADE_MS / DRAW_MS / the easing here to match.
  */
+import {captureAudioStream, stopAudioCapture} from "./pencil-audio";
 
 // Mirror of src/global.css animation timings, but intentionally slower for
 // recording — the on-screen animations feel longer because elements reveal
@@ -68,11 +69,15 @@ function getInlineFontStyle(): Promise<string> {
   return fontStylePromise;
 }
 
-function triggerDownload(blob: Blob) {
+function triggerDownload(blob: Blob, name: string) {
+  // Sanitize to a safe filename; fall back to a timestamp.
+  const safe =
+    name.trim().replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") ||
+    `excalidraw-${Date.now()}`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `excalidraw-${Date.now()}.webm`;
+  a.download = `${safe}.webm`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -83,7 +88,12 @@ function triggerDownload(blob: Blob) {
  */
 export function recordContainer(
   container: HTMLElement,
-  opts: {fps?: number; onStop?: () => void; onReady?: () => void} = {},
+  opts: {
+    fps?: number;
+    filename?: string;
+    onStop?: () => void;
+    onReady?: () => void;
+  } = {},
 ): RecordHandle {
   const fps = opts.fps ?? 30;
   const rect = container.getBoundingClientRect();
@@ -106,9 +116,14 @@ export function recordContainer(
   ctx.fillRect(0, 0, w, h);
 
   const stream = canvas.captureStream(fps);
+
+  // Capture the pencil-stroke audio into the recording too.
+  const audioTrack = captureAudioStream();
+  if (audioTrack) stream.addTrack(audioTrack);
+
   const mimeType = [
-    "video/webm;codecs=vp9",
-    "video/webm;codecs=vp8",
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
     "video/webm",
   ].find((m) => MediaRecorder.isTypeSupported(m));
   if (!mimeType) throw new Error("No supported video/webm codec");
@@ -118,10 +133,12 @@ export function recordContainer(
     if (e.data.size > 0) chunks.push(e.data);
   };
   recorder.onstop = () => {
+    stopAudioCapture();
     stream.getTracks().forEach((t) => t.stop());
     const bytes = chunks.reduce((n, c) => n + c.size, 0);
     console.log("[record] stop —", chunks.length, "chunks,", bytes, "bytes");
-    if (bytes > 0) triggerDownload(new Blob(chunks, {type: mimeType}));
+    if (bytes > 0)
+      triggerDownload(new Blob(chunks, {type: mimeType}), opts.filename ?? "");
     opts.onStop?.();
   };
 
@@ -150,11 +167,12 @@ export function recordContainer(
   // the same element. We track appear-time per ordinal N. New trailing groups
   // get a fresh timestamp; existing ones keep theirs — no flash, no re-fade.
   //
-  // "Real element group" = a top-level group with a translate+rotate transform
-  // (filters out the mask/defs/metadata siblings seen in the structure dump).
+  // "Real element group" = a top-level <g>. Shapes/text carry a
+  // translate+rotate transform; ARROWS render as a transform-less <g> (with a
+  // <mask> sibling) — so we must NOT require a transform or arrows get dropped
+  // (no fade/draw-on). The non-element siblings in the structure dump
+  // (metadata, defs, mask) are not <g>, so `:scope > g` already excludes them.
   const appeared: number[] = [];
-  const isElementGroup = (el: Element) =>
-    /translate\(.*\)\s*rotate\(/.test(el.getAttribute("transform") ?? "");
 
   let fontStyle = "";
   let running = true;
@@ -189,11 +207,8 @@ export function recordContainer(
       console.log("[record] top-level children:\n" + kids.join("\n"));
     }
 
-    // Real element groups, in append order. Filtering to transformed groups
-    // drops the mask/defs/metadata siblings so ordinals map 1:1 to elements.
-    const els = Array.from(
-      clone.querySelectorAll<SVGElement>(":scope > g"),
-    ).filter(isElementGroup);
+    // Top-level <g>, in append order — one per element (shapes, text, arrows).
+    const els = clone.querySelectorAll<SVGElement>(":scope > g");
 
     els.forEach((el, idx) => {
       // Nth element keeps its appear-time; only new trailing ordinals get a

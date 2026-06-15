@@ -171,6 +171,7 @@ function DevControls({mock}: {mock: MockAppControls}) {
 
   // ── Recording (canvas capture → .webm, no screen-share/ffmpeg) ──────────
   const [recording, setRecording] = useState(false);
+  const [recordName, setRecordName] = useState("");
   const recorderRef = useRef<RecordHandle | null>(null);
 
   const stopRecording = useCallback(() => {
@@ -203,6 +204,7 @@ function DevControls({mock}: {mock: MockAppControls}) {
     container.querySelector(".svg-wrapper svg")?.remove();
     recorderRef.current = recordContainer(container, {
       fps: 30,
+      filename: recordName,
       onStop: () => setRecording(false),
       onReady: () => {
         mock.streamElements(els, interval, () => {
@@ -210,7 +212,7 @@ function DevControls({mock}: {mock: MockAppControls}) {
         });
       },
     });
-  }, [json, interval, mock, stopRecording]);
+  }, [json, interval, mock, stopRecording, recordName]);
 
   return (
     <div
@@ -322,6 +324,29 @@ function DevControls({mock}: {mock: MockAppControls}) {
                 </option>
               ))}
             </select>
+          </div>
+          <div style={{display: "flex", gap: 6, alignItems: "center"}}>
+            <span style={{color: "rgba(255,255,255,0.45)", fontSize: 11}}>
+              Recording name:
+            </span>
+            <input
+              value={recordName}
+              onChange={(e) => setRecordName(e.target.value)}
+              placeholder="excalidraw"
+              disabled={recording}
+              style={{
+                flex: 1,
+                background: "rgba(255,255,255,0.08)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                borderRadius: 5,
+                color: "#fff",
+                fontSize: 11,
+                padding: "4px 6px",
+              }}
+            />
+            <span style={{color: "rgba(255,255,255,0.35)", fontSize: 11}}>
+              .webm
+            </span>
           </div>
           <div
             style={{

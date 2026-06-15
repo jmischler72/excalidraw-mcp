@@ -11,6 +11,9 @@ let audioCtx: AudioContext | null = null;
 let softBuffer: AudioBuffer | null = null;
 let initialized = false;
 let initPromise: Promise<void> | null = null;
+// Optional recording tap — when set, stroke audio is also routed here so a
+// MediaRecorder can capture it (see captureAudioStream).
+let recordDest: MediaStreamAudioDestinationNode | null = null;
 
 function getAudioContext(): AudioContext {
   if (!audioCtx) {
@@ -42,6 +45,24 @@ export async function initPencilAudio(): Promise<void> {
     }
   })();
   return initPromise;
+}
+
+/**
+ * Begin capturing stroke audio into a MediaStream (for recording). Returns the
+ * audio track to add to the recorded stream, or null if audio isn't ready.
+ * Call stopAudioCapture() when done.
+ */
+export function captureAudioStream(): MediaStreamTrack | null {
+  if (!audioCtx) return null;
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  recordDest = audioCtx.createMediaStreamDestination();
+  return recordDest.stream.getAudioTracks()[0] ?? null;
+}
+
+/** Stop routing stroke audio to the recording tap. */
+export function stopAudioCapture(): void {
+  recordDest?.disconnect();
+  recordDest = null;
 }
 
 /** Play a pencil stroke sound for a given element type. */
@@ -79,9 +100,11 @@ export function playStroke(elementType: string): void {
   const duration = isLine ? 0.3 + Math.random() * 0.3 : 0.2 + Math.random() * 0.4;
   gain.gain.linearRampToValueAtTime(0, ctx.currentTime + duration); // fade out
 
-  // Connect: source → gain → destination
+  // Connect: source → gain → destination (speakers), and the recording tap
+  // if one is attached so the strokes land in the captured video too.
   source.connect(gain);
   gain.connect(ctx.destination);
+  if (recordDest) gain.connect(recordDest);
 
   // Start at random offset within the sample
   const maxOffset = Math.max(0, buffer.duration - duration - 0.1);
