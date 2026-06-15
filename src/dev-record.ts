@@ -97,11 +97,12 @@ export function recordContainer(
 ): RecordHandle {
   const fps = opts.fps ?? 30;
   const rect = container.getBoundingClientRect();
-  // Cap output resolution so each frame's SVG decode + drawImage stays cheap
-  // enough to sustain the target fps. Full devicePixelRatio (2x on retina)
-  // quadruples per-frame pixel work and starves the frame loop.
-  const MAX_W = 1280;
-  const scale = Math.min(1, MAX_W / rect.width);
+  // Render at the screen's pixel density (crisp strokes/text on retina),
+  // capped so a huge container doesn't make per-frame SVG decode too slow.
+  const MAX_W = 2560;
+  const dpr = window.devicePixelRatio || 1;
+  const target = Math.min(rect.width * dpr, MAX_W);
+  const scale = target / rect.width;
   // libvpx is happiest with even dimensions.
   const w = Math.max(2, Math.round((rect.width * scale) / 2) * 2);
   const h = Math.max(2, Math.round((rect.height * scale) / 2) * 2);
@@ -110,6 +111,9 @@ export function recordContainer(
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d")!;
+  // Smooth downscaling of the rasterized SVG.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
 
   // Paint one frame up-front so the stream has content before recording.
   ctx.fillStyle = "#ffffff";
@@ -127,7 +131,18 @@ export function recordContainer(
     "video/webm",
   ].find((m) => MediaRecorder.isTypeSupported(m));
   if (!mimeType) throw new Error("No supported video/webm codec");
-  const recorder = new MediaRecorder(stream, {mimeType});
+  // High bitrate so the hand-drawn strokes don't turn to compression mush.
+  // Scale roughly with pixel count (~0.2 bits/px/frame), clamped to a sane
+  // ceiling, plus a small audio allowance.
+  const videoBitsPerSecond = Math.min(
+    24_000_000,
+    Math.round(w * h * fps * 0.2),
+  );
+  const recorder = new MediaRecorder(stream, {
+    mimeType,
+    videoBitsPerSecond,
+    audioBitsPerSecond: 128_000,
+  });
   const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => {
     if (e.data.size > 0) chunks.push(e.data);
@@ -274,7 +289,12 @@ export function recordContainer(
   });
 
   recorder.start(200); // timeslice → periodic dataavailable chunks
-  console.log("[record] started, mimeType:", mimeType, `${w}x${h}`);
+  console.log(
+    "[record] started",
+    mimeType,
+    `${w}x${h}`,
+    `${Math.round(videoBitsPerSecond / 1e6)}Mbps`,
+  );
   requestAnimationFrame(renderFrame);
   opts.onReady?.();
 
