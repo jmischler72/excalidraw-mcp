@@ -10,7 +10,12 @@ import {createRoot} from "react-dom/client";
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {ExcalidrawAppCore} from "./mcp-app";
 import {createMockApp, type MockAppControls} from "./dev-mock";
+import {recordContainer, type RecordHandle} from "./dev-record";
 import "./global.css";
+
+// Tail after the last element so the final draw-on finishes before we stop
+// (longest CSS animation is 0.6s — see src/global.css).
+const RECORD_TAIL_MS = 900;
 
 // ── Sample elements (skeleton format with labels, same as LLM output) ────
 
@@ -164,6 +169,49 @@ function DevControls({mock}: {mock: MockAppControls}) {
     if (lastElements) mock.streamElements(lastElements, interval);
   }, [lastElements, interval, mock]);
 
+  // ── Recording (canvas capture → .webm, no screen-share/ffmpeg) ──────────
+  const [recording, setRecording] = useState(false);
+  const recorderRef = useRef<RecordHandle | null>(null);
+
+  const stopRecording = useCallback(() => {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+  }, []);
+
+  const record = useCallback(() => {
+    let els: any[];
+    try {
+      els = parseElements(json);
+      setLastElements(els);
+      setError(null);
+    } catch (e: any) {
+      setError(e.message ?? "Invalid JSON");
+      return;
+    }
+    const container = document.querySelector<HTMLElement>(
+      ".excalidraw-container",
+    );
+    if (!container) {
+      setError("No .excalidraw-container to record");
+      return;
+    }
+    setRecording(true);
+    // Clear any previously-rendered scene so the recording starts blank and
+    // every element fades in fresh. renderSvgPreview([]) early-returns on empty
+    // (leaving the old SVG), so wipe the rendered SVG directly. Then stream
+    // only once the recorder is actually capturing (onReady).
+    container.querySelector(".svg-wrapper svg")?.remove();
+    recorderRef.current = recordContainer(container, {
+      fps: 30,
+      onStop: () => setRecording(false),
+      onReady: () => {
+        mock.streamElements(els, interval, () => {
+          setTimeout(stopRecording, RECORD_TAIL_MS);
+        });
+      },
+    });
+  }, [json, interval, mock, stopRecording]);
+
   return (
     <div
       style={{
@@ -225,6 +273,22 @@ function DevControls({mock}: {mock: MockAppControls}) {
             <button onClick={stream} style={btnStyle} disabled={!json.trim()}>
               ▶ Stream
             </button>
+            {recording ? (
+              <button
+                onClick={stopRecording}
+                style={{...btnStyle, color: "#ff6b6b"}}
+              >
+                ■ Stop
+              </button>
+            ) : (
+              <button
+                onClick={record}
+                style={{...btnStyle, color: "#ff6b6b"}}
+                disabled={!json.trim()}
+              >
+                ● Record
+              </button>
+            )}
             <button onClick={load} style={btnStyle} disabled={!json.trim()}>
               Load (instant)
             </button>

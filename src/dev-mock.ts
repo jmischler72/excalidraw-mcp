@@ -18,8 +18,13 @@ export interface MockAppControls {
   /**
    * Stream elements one-by-one with a delay, then finalize.
    * Useful for testing the streaming SVG preview pipeline.
+   * `onComplete` fires right after the final tool input is sent.
    */
-  streamElements(elements: any[], intervalMs?: number): void;
+  streamElements(
+    elements: any[],
+    intervalMs?: number,
+    onComplete?: () => void,
+  ): void;
 }
 
 export function createMockApp(): MockAppControls {
@@ -102,7 +107,7 @@ export function createMockApp(): MockAppControls {
       _ontoolresult?.({ structuredContent: { checkpointId } });
     },
 
-    streamElements(elements: any[], intervalMs = 120) {
+    streamElements(elements: any[], intervalMs = 120, onComplete?: () => void) {
       let i = 0;
       const tick = () => {
         if (i < elements.length) {
@@ -112,6 +117,7 @@ export function createMockApp(): MockAppControls {
         } else {
           // Finalize
           _ontoolinput?.({ elements: JSON.stringify(elements) });
+          onComplete?.();
         }
       };
       tick();
