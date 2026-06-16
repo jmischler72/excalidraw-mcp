@@ -19,12 +19,13 @@ export interface MockAppControls {
    * Stream elements one-by-one with a delay, then finalize.
    * Useful for testing the streaming SVG preview pipeline.
    * `onComplete` fires right after the final tool input is sent.
+   * Returns a `cancel()` that halts the stream immediately (no finalize).
    */
   streamElements(
     elements: any[],
     intervalMs?: number,
     onComplete?: () => void,
-  ): void;
+  ): () => void;
 }
 
 export function createMockApp(): MockAppControls {
@@ -109,11 +110,14 @@ export function createMockApp(): MockAppControls {
 
     streamElements(elements: any[], intervalMs = 120, onComplete?: () => void) {
       let i = 0;
+      let cancelled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
       const tick = () => {
+        if (cancelled) return;
         if (i < elements.length) {
           i++;
           _ontoolinputpartial?.({ elements: JSON.stringify(elements.slice(0, i)) });
-          setTimeout(tick, intervalMs);
+          timer = setTimeout(tick, intervalMs);
         } else {
           // Finalize
           _ontoolinput?.({ elements: JSON.stringify(elements) });
@@ -121,6 +125,10 @@ export function createMockApp(): MockAppControls {
         }
       };
       tick();
+      return () => {
+        cancelled = true;
+        if (timer != null) clearTimeout(timer);
+      };
     },
   };
 }

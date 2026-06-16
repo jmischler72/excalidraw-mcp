@@ -173,9 +173,21 @@ function DevControls({mock}: {mock: MockAppControls}) {
   const [recording, setRecording] = useState(false);
   const [recordName, setRecordName] = useState("");
   const recorderRef = useRef<RecordHandle | null>(null);
+  const cancelStreamRef = useRef<(() => void) | null>(null);
 
-  const stopRecording = useCallback(() => {
+  // Auto-stop when the animation finishes: finalize the webm and download.
+  const finishRecording = useCallback(() => {
+    cancelStreamRef.current = null;
     recorderRef.current?.stop();
+    recorderRef.current = null;
+  }, []);
+
+  // User clicked "Stop record": abort the recording (no download) and halt
+  // the streaming animation immediately.
+  const abortRecording = useCallback(() => {
+    cancelStreamRef.current?.();
+    cancelStreamRef.current = null;
+    recorderRef.current?.abort();
     recorderRef.current = null;
   }, []);
 
@@ -207,12 +219,12 @@ function DevControls({mock}: {mock: MockAppControls}) {
       filename: recordName,
       onStop: () => setRecording(false),
       onReady: () => {
-        mock.streamElements(els, interval, () => {
-          setTimeout(stopRecording, RECORD_TAIL_MS);
+        cancelStreamRef.current = mock.streamElements(els, interval, () => {
+          setTimeout(finishRecording, RECORD_TAIL_MS);
         });
       },
     });
-  }, [json, interval, mock, stopRecording, recordName]);
+  }, [json, interval, mock, finishRecording, recordName]);
 
   return (
     <div
@@ -277,7 +289,7 @@ function DevControls({mock}: {mock: MockAppControls}) {
             </button>
             {recording ? (
               <button
-                onClick={stopRecording}
+                onClick={abortRecording}
                 style={{...btnStyle, color: "#ff6b6b"}}
               >
                 ■ Stop

@@ -39,6 +39,8 @@ const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 export interface RecordHandle {
   /** Stop recording, finalize the webm, and trigger the download. */
   stop(): void;
+  /** Stop recording immediately and discard — no finalize, no download. */
+  abort(): void;
 }
 
 /**
@@ -151,8 +153,11 @@ export function recordContainer(
     stopAudioCapture();
     stream.getTracks().forEach((t) => t.stop());
     const bytes = chunks.reduce((n, c) => n + c.size, 0);
-    console.log("[record] stop —", chunks.length, "chunks,", bytes, "bytes");
-    if (bytes > 0)
+    console.log(
+      "[record] stop —",
+      aborted ? "aborted (discarded)" : `${chunks.length} chunks, ${bytes} bytes`,
+    );
+    if (!aborted && bytes > 0)
       triggerDownload(new Blob(chunks, {type: mimeType}), opts.filename ?? "");
     opts.onStop?.();
   };
@@ -192,6 +197,7 @@ export function recordContainer(
   let fontStyle = "";
   let running = true;
   let drawing = false;
+  let aborted = false;
   let framesDrawn = 0;
 
   const serializer = new XMLSerializer();
@@ -307,6 +313,14 @@ export function recordContainer(
       setTimeout(() => {
         if (recorder.state !== "inactive") recorder.stop();
       }, 100);
+    },
+    abort() {
+      if (!running) return;
+      running = false;
+      aborted = true;
+      console.log("[record] aborted — discarding recording");
+      // Stop right away — no need to capture a final frame, nothing is saved.
+      if (recorder.state !== "inactive") recorder.stop();
     },
   };
 }
